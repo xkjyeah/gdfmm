@@ -28,44 +28,81 @@ GDFMM::GDFMM(float sigmaDistance,
   assert(windowSize_ % 2 == 1 && windowSize >= 3);
 }
 
-static void ComputeDepthGradients(
+static pair<float, float> ComputeDepthGradient(
                             const cv::Mat &depthImage,
-                            cv::Mat *depthGradientX,
-                            cv::Mat *depthGradientY) {
-  for (int y=0; y<depthImage.rows; y++) {
-    for (int x=0; x<depthImage.cols; x++) {
-      float dx = 0, dy = 0;
-      int wx = 0, wy = 0;
+                            int x, int y) {
+  float dx = 0, dy = 0;
+  int wx = 0, wy = 0;
 
-      if (x > 0 && depthImage.at<float>(y,x) != 0
-                && depthImage.at<float>(y,x-1) != 0) {
-        dx += depthImage.at<float>(y,x) - depthImage.at<float>(y,x-1);
-        wx++;
-      }
-      if (x+1 < depthImage.cols
-                && depthImage.at<float>(y,x+1) != 0
-                && depthImage.at<float>(y,x) != 0) {
-        dx += depthImage.at<float>(y,x+1) - depthImage.at<float>(y,x);
-        wx++;
-      }
-
-      if (y > 0 && depthImage.at<float>(y,x) != 0
-                && depthImage.at<float>(y-1,x) != 0) {
-        dy += depthImage.at<float>(y,x) - depthImage.at<float>(y-1,x);
-        wy++;
-      }
-      if (y+1 < depthImage.rows
-                && depthImage.at<float>(y+1,x) != 0
-                && depthImage.at<float>(y,x) != 0) {
-        dy += depthImage.at<float>(y+1,x) - depthImage.at<float>(y,x);
-        wy++;
-      }
-
-      depthGradientX->at<float>(y,x) = (wx > 0) ? dx / wx : 0;
-      depthGradientY->at<float>(y,x) = (wy > 0) ? dy / wy : 0;
-    }
+  if (x > 0 && depthImage.at<float>(y,x) != 0
+            && depthImage.at<float>(y,x-1) != 0) {
+    dx += depthImage.at<float>(y,x) - depthImage.at<float>(y,x-1);
+    wx++;
   }
+  if (x+1 < depthImage.cols
+            && depthImage.at<float>(y,x+1) != 0
+            && depthImage.at<float>(y,x) != 0) {
+    dx += depthImage.at<float>(y,x+1) - depthImage.at<float>(y,x);
+    wx++;
+  }
+
+  if (y > 0 && depthImage.at<float>(y,x) != 0
+            && depthImage.at<float>(y-1,x) != 0) {
+    dy += depthImage.at<float>(y,x) - depthImage.at<float>(y-1,x);
+    wy++;
+  }
+  if (y+1 < depthImage.rows
+            && depthImage.at<float>(y+1,x) != 0
+            && depthImage.at<float>(y,x) != 0) {
+    dy += depthImage.at<float>(y+1,x) - depthImage.at<float>(y,x);
+    wy++;
+  }
+
+//  depthGradientX->at<float>(y,x) = (wx > 0) ? dx / wx : 0;
+//  depthGradientY->at<float>(y,x) = (wy > 0) ? dy / wy : 0;
+  return std::make_pair(
+      (wx > 0) ? dx / wx : 0,
+      (wy > 0) ? dy / wy : 0
+      );
 }
+//static void ComputeDepthGradients(
+//                            const cv::Mat &depthImage,
+//                            cv::Mat *depthGradientX,
+//                            cv::Mat *depthGradientY) {
+//  for (int y=0; y<depthImage.rows; y++) {
+//    for (int x=0; x<depthImage.cols; x++) {
+//      float dx = 0, dy = 0;
+//      int wx = 0, wy = 0;
+//
+//      if (x > 0 && depthImage.at<float>(y,x) != 0
+//                && depthImage.at<float>(y,x-1) != 0) {
+//        dx += depthImage.at<float>(y,x) - depthImage.at<float>(y,x-1);
+//        wx++;
+//      }
+//      if (x+1 < depthImage.cols
+//                && depthImage.at<float>(y,x+1) != 0
+//                && depthImage.at<float>(y,x) != 0) {
+//        dx += depthImage.at<float>(y,x+1) - depthImage.at<float>(y,x);
+//        wx++;
+//      }
+//
+//      if (y > 0 && depthImage.at<float>(y,x) != 0
+//                && depthImage.at<float>(y-1,x) != 0) {
+//        dy += depthImage.at<float>(y,x) - depthImage.at<float>(y-1,x);
+//        wy++;
+//      }
+//      if (y+1 < depthImage.rows
+//                && depthImage.at<float>(y+1,x) != 0
+//                && depthImage.at<float>(y,x) != 0) {
+//        dy += depthImage.at<float>(y+1,x) - depthImage.at<float>(y,x);
+//        wy++;
+//      }
+//
+//      depthGradientX->at<float>(y,x) = (wx > 0) ? dx / wx : 0;
+//      depthGradientY->at<float>(y,x) = (wy > 0) ? dy / wy : 0;
+//    }
+//  }
+//}
 
 cv::Mat GDFMM::InPaint(const cv::Mat &depthImageOriginal,
                 const cv::Mat &rgbImage,
@@ -77,12 +114,12 @@ cv::Mat GDFMM::InPaint(const cv::Mat &depthImageOriginal,
   //                CV_32F);
 
   // depth gradient
-  cv::Mat depthGradientX(depthImageOriginal.rows, depthImageOriginal.cols, CV_32F);
-  cv::Mat depthGradientY(depthImageOriginal.rows, depthImageOriginal.cols, CV_32F);
+//  cv::Mat depthGradientX(depthImageOriginal.rows, depthImageOriginal.cols, CV_32F);
+//  cv::Mat depthGradientY(depthImageOriginal.rows, depthImageOriginal.cols, CV_32F);
   
   // Cannot use Sobel, because depth is sometimes unknown
   depthImageOriginal.convertTo(depthImage, CV_32F);
-  ComputeDepthGradients(depthImage, &depthGradientX, &depthGradientY);
+// ComputeDepthGradients(depthImage, &depthGradientX, &depthGradientY);
 
   // gradient image, then (Gaussian blur)
   // resize rgb to depth image (specifically for Tango device)
@@ -144,8 +181,6 @@ cv::Mat GDFMM::InPaint(const cv::Mat &depthImageOriginal,
       if (depthImage.at<float>(neighbour.y, neighbour.x) == 0) {
         depthImage.at<float>(neighbour.y, neighbour.x) =
               PredictDepth(depthImage,
-                            depthGradientX,
-                            depthGradientY,
                             rgbImage,
                             neighbour.x, neighbour.y);
 
@@ -188,15 +223,9 @@ float GDFMM::BilateralWeight(const Point &p1,
 }
 
 float GDFMM::PredictDepth(const cv::Mat &depthImage,
-                         const cv::Mat &depthGradientX,
-                         const cv::Mat &depthGradientY,
                          const cv::Mat &rgbImage,
                          int x, int y) {
-  assert(depthImage.cols == depthGradientX.cols);
-  assert(depthImage.cols == depthGradientY.cols);
   assert(depthImage.cols == rgbImage.cols);
-  assert(depthImage.rows == depthGradientX.rows);
-  assert(depthImage.rows == depthGradientY.rows);
   assert(depthImage.rows == rgbImage.rows);
 
   float sumWeights = 0;
@@ -216,9 +245,9 @@ float GDFMM::PredictDepth(const cv::Mat &depthImage,
 
       float weight = BilateralWeight(Point{x,y}, Point{m,n}, rgbImage);
 
-      float gradientTerm =
-          depthGradientX.at<float>(n,m) * (x-m) + 
-          depthGradientY.at<float>(n,m) * (y-n); 
+      float gX, gY;
+      std::tie(gX, gY) = ComputeDepthGradient(depthImage, m, n);
+      float gradientTerm = gX * (x-m) + gY * (y-n); 
 
       //printf("for (%d %d), neighbourhood (%d %d) %f %f %f\n", x,y, m,n, weight, depth, gradientTerm);
 
