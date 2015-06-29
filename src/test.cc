@@ -13,9 +13,12 @@ void test_inpaint() {
   cv::Mat rgb = cv::imread("/home/daniel/littlechair/0134_color.png", CV_LOAD_IMAGE_UNCHANGED);
   cv::Mat dep = cv::imread("/home/daniel/littlechair/0133_depth.png", CV_LOAD_IMAGE_UNCHANGED);
 
-  gdfmm::GDFMM gdfmm(1, 20, 3);
+  cv::resize(rgb, rgb, cv::Size(dep.cols, dep.rows));
+
+  gdfmm::GDFMM gdfmm(1, 20, 11);
   cv::Mat rv = gdfmm.InPaint(dep, rgb);
-  rv *= 5;
+  rv = rv - dep;
+  rv *= 10;
   cv::imshow("result", rv);
   cv::waitKey(0);
 }
@@ -39,6 +42,6 @@ void test_guided_filter() {
 }
 
 int main() {
-  test_guided_filter();
+  test_inpaint();
 }
 

@@ -1,3 +1,4 @@
+// Copyright 2015 ETH Zurich. All rights reserved
 #include "gdfmm/gdfmm.h"
 
 #include <opencv2/core/core.hpp>
@@ -8,9 +9,13 @@
 #include <queue>
 #include <algorithm>
 #include <utility>
+#include <iostream>
 #include <cassert>
+#include <eigen3/Eigen/Eigen>
 
 #include <cstdio>
+
+#define COV_PREDICT_METHOD
 
 namespace gdfmm {
 using std::set;
@@ -104,9 +109,45 @@ static pair<float, float> ComputeDepthGradient(
 //  }
 //}
 
-cv::Mat GDFMM::InPaint(const cv::Mat &depthImageOriginal,
+
+cv::Mat GDFMM::InPaint(const cv::Mat &depthImage,
+                      const cv::Mat &rgbImageOriginal,
+                      cv::Mat *output) {
+  return InPaintBase(depthImage,
+                      rgbImageOriginal,
+                      output,
+                      [this] (const cv::Mat &dI,
+                          const cv::Mat &rgbI,
+                          int x, int y) {
+                        return PredictDepth(dI, rgbI, x, y);
+                      });
+}
+
+cv::Mat GDFMM::InPaint2(const cv::Mat &depthImage,
+                      const cv::Mat &rgbImageOriginal,
+                      float epsilon,
+                      float constant,
+                      float truncation,
+                      cv::Mat *output) {
+  return InPaintBase(depthImage,
+                      rgbImageOriginal,
+                      output,
+                      [this, epsilon, constant, truncation]
+                      (const cv::Mat &dI,
+                          const cv::Mat &rgbI,
+                          int x, int y) {
+                        return PredictDepth2(dI, rgbI,
+                                             x, y,
+                                             epsilon, constant,
+                                             truncation);
+                      });
+}
+
+template <class PredictMethod>
+cv::Mat GDFMM::InPaintBase(const cv::Mat &depthImageOriginal,
                 const cv::Mat &rgbImage,
-                cv::Mat *output) {
+                cv::Mat *output,
+                const PredictMethod &predict) {
   assert(rgbImage.cols == depthImageOriginal.cols &&
           rgbImage.rows == depthImageOriginal.rows);
   cv::Mat depthImage;
@@ -180,9 +221,9 @@ cv::Mat GDFMM::InPaint(const cv::Mat &depthImageOriginal,
 
       if (depthImage.at<float>(neighbour.y, neighbour.x) == 0) {
         depthImage.at<float>(neighbour.y, neighbour.x) =
-              PredictDepth(depthImage,
-                            rgbImage,
-                            neighbour.x, neighbour.y);
+              predict(depthImage,
+                      rgbImage,
+                      neighbour.x, neighbour.y);
 
         //printf("predicted (%d,%d) = %f\n", neighbour.y, neighbour.x, depthImage.at<float>(neighbour.y, neighbour.x));
 
@@ -258,6 +299,129 @@ float GDFMM::PredictDepth(const cv::Mat &depthImage,
   
   assert(sumWeights != 0);
   return sumValues / sumWeights;
+}
+
+/**
+ * An alternative implementation for situations where the missing areas
+ * are much larger. It uses the covariance matrix within the window instead.
+ *
+ * Because it uses regularized least squares, maybe you want to scale
+ * your RGB image to [0,1] first
+ * **/
+float GDFMM::PredictDepth2(const cv::Mat &depthImage,
+                         const cv::Mat &rgbImage,
+                         int x, int y,
+                         float epsilon,
+                         float constant,
+                         float truncation) {
+  assert(depthImage.cols == rgbImage.cols);
+  assert(depthImage.rows == rgbImage.rows);
+  assert(depthImage.depth() == CV_32F);
+
+  float sumWeights = 0;
+  float sumValues = 0;
+  int windowRadius = windowSize_ / 2;
+
+  // Count known pixels in the window
+  int lowerY = std::max(0, y - windowRadius);
+  int lowerX = std::max(0, x - windowRadius);
+  int upperY = std::min(depthImage.rows - 1, static_cast<int>(y + windowRadius));
+  int upperX = std::min(depthImage.cols - 1, static_cast<int>(x + windowRadius));
+
+  int num_known = 0;
+  for (int n = lowerY; n <= upperY; n++) {
+    for (int m = lowerX; m <= upperX; m++) {
+      if (depthImage.at<float>(n, m) == 0) {
+        continue;
+      }
+      else {
+        num_known++;
+      }
+    }
+  }
+
+  if (num_known <= 3) {
+    return 0;
+    throw "Too few known values. Try densifying your depth image first, "
+        "or increasing the window size.";
+  }
+
+  // Build the array
+  Eigen::Array<float, Eigen::Dynamic, 4> X(num_known, 4);
+  Eigen::Array<float, Eigen::Dynamic, 1> Y(num_known);
+  int index = 0;
+  for (int n = lowerY; n <= upperY; n++) {
+    for (int m = lowerX; m <= upperX; m++) {
+      if (depthImage.at<float>(n, m) == 0) {
+        continue;
+      }
+      else {
+        X(index, 0) = rgbImage.at<cv::Vec3b>(n, m)[0];
+        X(index, 1) = rgbImage.at<cv::Vec3b>(n, m)[1];
+        X(index, 2) = rgbImage.at<cv::Vec3b>(n, m)[2];
+        X(index, 3) = constant;
+        Y(index) = depthImage.at<float>(n, m);
+        index++;
+      }
+    }
+  }
+  
+  // Find mean
+  Eigen::Array<float, 1, 4> mX = X.colwise().mean();
+  Eigen::Array<float, 1, 1> mY = Y.colwise().mean();
+
+  // Find covariance
+  Eigen::Matrix4f cov = X.transpose().matrix() * X.matrix();
+  Eigen::Matrix4f reg;
+  reg << epsilon, 0, 0, 0,
+         0, epsilon, 0, 0,
+         0, 0, epsilon, 0,
+         0, 0, 0, epsilon;
+
+  cov = cov + reg;
+
+  // make prediction
+  Eigen::Vector4f beta;
+  Eigen::Array<float, 1, 4> xy = (X.colwise() * Y).colwise().sum();
+  beta = cov.ldlt().solve(xy.matrix().transpose());
+//  Eigen::Array<float, 1, 4> xy = (X.colwise() * Y).colwise().mean();
+//  beta = cov.ldlt().solve(xy.matrix().transpose());
+  
+  Eigen::Vector4f test(rgbImage.at<cv::Vec3b>(y, x)[0],
+            rgbImage.at<cv::Vec3b>(y, x)[1],
+            rgbImage.at<cv::Vec3b>(y, x)[2],
+            constant);
+  assert(rgbImage.depth() == CV_8U);
+  assert(rgbImage.channels() == 3);
+//  std::cout << "Y" << std::endl
+//            << Y.transpose() << std::endl;
+//  std::cout << "X" << std::endl
+//            << X.transpose() << std::endl;
+//  std::cout << "beta: " << beta << std::endl;
+//  std::cout << "test: " << test << std::endl;
+//  std::cout << "cov: " << cov << std::endl;
+//  std::cout << "xy: " << xy << std::endl;
+//  std::cout << num_known << std::endl;
+//  std::cout << beta.dot(test) << std::endl;
+  float prediction = beta.dot(test);
+  assert(!isnan(prediction));
+
+  // constrain the results to within a sane range
+//  float meanY = Y.mean();
+//  Eigen::Matrix<float, Eigen::Dynamic, 1> Y_mY = (Y - meanY).matrix();
+//  float varY = Y_mY.transpose() * Y_mY;
+//  varY /= (num_known - 1);
+//  float stdY = sqrt(varY);
+//
+//  prediction = std::max(meanY - 2 * stdY, prediction);
+//  prediction = std::min(meanY + 2 * stdY, prediction);
+  float minY = Y.minCoeff();
+  float maxY = Y.maxCoeff();
+  float rangeY = maxY - minY;
+  prediction = std::max(minY - rangeY * truncation, prediction);
+  prediction = std::min(maxY + rangeY * truncation, prediction);
+
+  return prediction;
 }
 
 static float ComputeSpeed(const cv::Mat &gradientStrength,
