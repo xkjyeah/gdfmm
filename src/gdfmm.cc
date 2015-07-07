@@ -15,7 +15,7 @@
 
 #include <cstdio>
 
-#define COV_PREDICT_METHOD
+#define CHECK(expr) if (!(expr)) { throw "Failed expression: " #expr "\n";}
 
 namespace gdfmm {
 using std::set;
@@ -38,6 +38,7 @@ static pair<float, float> ComputeDepthGradient(
                             int x, int y) {
   float dx = 0, dy = 0;
   int wx = 0, wy = 0;
+  assert(depthImage.depth() == CV_32F);
 
   if (x > 0 && depthImage.at<float>(y,x) != 0
             && depthImage.at<float>(y,x-1) != 0) {
@@ -148,9 +149,14 @@ cv::Mat GDFMM::InPaintBase(const cv::Mat &depthImageOriginal,
                 const cv::Mat &rgbImage,
                 cv::Mat *output,
                 const PredictMethod &predict) {
-  assert(rgbImage.cols == depthImageOriginal.cols &&
-          rgbImage.rows == depthImageOriginal.rows);
+  if (rgbImage.cols != depthImageOriginal.cols ||
+      rgbImage.rows != depthImageOriginal.rows) {
+    throw invalid_argument_error("Images must have same size.");
+  }
   cv::Mat depthImage;
+
+  CHECK(depthImageOriginal.channels() == 1);
+  CHECK(rgbImage.channels() == 3);
   //cv::Mat result(depthImageOriginal.rows, depthImageOriginal.cols,
   //                CV_32F);
 
@@ -164,8 +170,8 @@ cv::Mat GDFMM::InPaintBase(const cv::Mat &depthImageOriginal,
 
   // gradient image, then (Gaussian blur)
   // resize rgb to depth image (specifically for Tango device)
-  cv::Mat rgbGradientX(rgbImage.rows, rgbImage.cols, CV_32F);
-  cv::Mat rgbGradientY(rgbImage.rows, rgbImage.cols, CV_32F);
+  cv::Mat rgbGradientX(rgbImage.rows, rgbImage.cols, CV_32FC3);
+  cv::Mat rgbGradientY(rgbImage.rows, rgbImage.cols, CV_32FC3);
   cv::Mat tmp;
 
   cv::GaussianBlur(rgbImage, tmp, cv::Size(5,5), 1, 1);
@@ -220,16 +226,26 @@ cv::Mat GDFMM::InPaintBase(const cv::Mat &depthImageOriginal,
         continue;
 
       if (depthImage.at<float>(neighbour.y, neighbour.x) == 0) {
-        depthImage.at<float>(neighbour.y, neighbour.x) =
+        float prediction =
               predict(depthImage,
                       rgbImage,
                       neighbour.x, neighbour.y);
 
-        //printf("predicted (%d,%d) = %f\n", neighbour.y, neighbour.x, depthImage.at<float>(neighbour.y, neighbour.x));
-
-        float T = ComputeSpeed(rgbGradientStrength, neighbour);
-
-        narrowBand.emplace(T, neighbour);
+        depthImage.at<float>(neighbour.y, neighbour.x) = prediction;
+        
+        if (prediction != 0) {
+          float T = ComputeSpeed(rgbGradientStrength, neighbour);
+          narrowBand.emplace(T, neighbour);
+        }
+        else {
+          // re-try later
+          if (speed < -20) {
+            throw data_error("Too few known values. "
+                "Try densifying your depth image first, "
+                "or increasing the window size.");
+          }
+          narrowBand.emplace(speed - 1, position);
+        }
       }
     }
   }
@@ -248,20 +264,46 @@ float GDFMM::BilateralWeight(const Point &p1,
                       const Point &p2,
                       const cv::Mat &rgbImage) {
   assert(rgbImage.depth() == CV_8U);
-  cv::Vec3f c1 = rgbImage.at<uint8_t>(p1.y, p1.x);
-  cv::Vec3f c2 = rgbImage.at<uint8_t>(p2.y, p2.y);
+  assert(rgbImage.channels() == 3);
+  const uint8_t *c1 = rgbImage.at<uint8_t[3]>(p1.y, p1.x);
+  const uint8_t *c2 = rgbImage.at<uint8_t[3]>(p2.y, p2.x);
       //printf("%f\n", distExpCache_(p1.x - p1.x) );
       //printf("%f\n", distExpCache_(p2.y - p2.y) );
       //printf("%f\n", colorExpCache_(c1[0] - c2[0]) );
       //printf("%f\n", colorExpCache_(c1[1] - c2[1]) );
       //printf("%f\n", colorExpCache_(c1[2] - c2[2]));
   return
-      distExpCache_(p1.x - p1.x) *
-      distExpCache_(p2.y - p2.y) *
-      colorExpCache_(c1[0] - c2[0]) *
-      colorExpCache_(c1[1] - c2[1]) *
-      colorExpCache_(c1[2] - c2[2]);
+      distExpCache_(p2.x - p1.x) *
+      distExpCache_(p2.y - p1.y) *
+      colorExpCache_((int)c1[0] - (int)c2[0]) *
+      colorExpCache_((int)c1[1] - (int)c2[1]) *
+      colorExpCache_((int)c1[2] - (int)c2[2]);
 }
+
+// float CorrelationWeight(const Point &p1,
+//                         const Point &p2,
+//                         const cv::Mat &rgbImage,
+//                         int windowRadius)
+// {
+//   // find mean intensity around p1
+//   int lowerY = std::max(0, p1.y - windowRadius);
+//   int lowerX = std::max(0, p1.x - windowRadius);
+//   int upperY = std::min(rgbImage.rows - 1, static_cast<int>(p1.y + windowRadius));
+//   int upperX = std::min(rgbImage.cols - 1, static_cast<int>(p1.x + windowRadius));
+// 
+//   int num_known = 0;
+//   Eigen::Vector3f sumI(0,0,0);
+//   Eigen::Vector3f sumI2(0,0,0);
+//   for (int n = lowerY; n <= upperY; n++) {
+//     for (int m = lowerX; m <= upperX; m++) {
+//       cv::Vec3b rgb = rgbImage.at<cv::Vec3b>(p1.y, p1.x);
+//       Eigen::Vector3b rgbf(rgb[0], rgb[1], rgb[2]);
+//       sumI += rgbf;
+//       sumI2 += (rgbf.array() * rgbf.array()).matrix();
+//     }
+//   }
+//   // compute covariance... (ah shit)
+// }
 
 float GDFMM::PredictDepth(const cv::Mat &depthImage,
                          const cv::Mat &rgbImage,
@@ -271,6 +313,7 @@ float GDFMM::PredictDepth(const cv::Mat &depthImage,
 
   float sumWeights = 0;
   float sumValues = 0;
+  int count = 0;
   int windowRadius = windowSize_ / 2;
 
   for (int n = std::max(0, y - windowRadius);
@@ -280,11 +323,11 @@ float GDFMM::PredictDepth(const cv::Mat &depthImage,
          m <= std::min(depthImage.cols - 1, static_cast<int>(x + windowRadius));
          m++) {
       float depth = depthImage.at<float>(n, m);
-
       if (depth == 0) // invalid
         continue;
 
       float weight = BilateralWeight(Point{x,y}, Point{m,n}, rgbImage);
+    ///  float weight2 = CorrelationWeight(Point{x,y}, Point{m,n}, rgbImage, windowRadius);
 
       float gX, gY;
       std::tie(gX, gY) = ComputeDepthGradient(depthImage, m, n);
@@ -294,10 +337,13 @@ float GDFMM::PredictDepth(const cv::Mat &depthImage,
 
       sumValues += weight * (depth + gradientTerm);
       sumWeights += weight;
+      count ++;
     }
   }
   
-  assert(sumWeights != 0);
+  if (count <= 3) {
+    return 0;
+  }
   return sumValues / sumWeights;
 }
 
@@ -318,8 +364,6 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
   assert(depthImage.rows == rgbImage.rows);
   assert(depthImage.depth() == CV_32F);
 
-  float sumWeights = 0;
-  float sumValues = 0;
   int windowRadius = windowSize_ / 2;
 
   // Count known pixels in the window
@@ -342,8 +386,9 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
 
   if (num_known <= 3) {
     return 0;
-    throw "Too few known values. Try densifying your depth image first, "
-        "or increasing the window size.";
+    throw data_error("Too few known values. "
+        "Try densifying your depth image first, "
+        "or increasing the window size.");
   }
 
   // Build the array

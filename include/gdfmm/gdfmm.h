@@ -2,6 +2,7 @@
 
 #include <opencv2/core/core.hpp>
 #include <memory>
+#include "errors.h"
 
 namespace gdfmm {
 
