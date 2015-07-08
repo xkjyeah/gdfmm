@@ -26,10 +26,13 @@ static float ComputeSpeed(const cv::Mat &gradientStrength,
 
 GDFMM::GDFMM(float sigmaDistance,
         float sigmaColor,
+        float blurSigma,
         int windowSize)
   : distExpCache_(sigmaDistance, windowSize),
     colorExpCache_(sigmaColor, 255),
-    windowSize_(windowSize) {
+    windowSize_(windowSize),
+    blurSigma_(blurSigma)
+  {
   assert(windowSize_ % 2 == 1 && windowSize >= 3);
 }
 
@@ -136,7 +139,7 @@ cv::Mat GDFMM::InPaintBase(const cv::Mat &depthImageOriginal,
   cv::Mat rgbGradientY(rgbImage.rows, rgbImage.cols, CV_32FC3);
   cv::Mat tmp;
 
-  cv::GaussianBlur(rgbImage, tmp, cv::Size(5,5), 1, 1);
+  cv::GaussianBlur(rgbImage, tmp, cv::Size(0,0), blurSigma_, blurSigma_);
   cv::Sobel(tmp, rgbGradientX, CV_32F, 1, 0, 3);
   cv::Sobel(tmp, rgbGradientY, CV_32F, 0, 1, 3);
 
@@ -283,14 +286,14 @@ float GDFMM::PredictDepth(const cv::Mat &depthImage,
       if (depth == 0) // invalid
         continue;
 
-      float weight = BilateralWeight(Point{x,y}, Point{m,n}, rgbImage);
+      float weight = std::max((float)1e-6, BilateralWeight(Point{x,y}, Point{m,n}, rgbImage));
     ///  float weight2 = CorrelationWeight(Point{x,y}, Point{m,n}, rgbImage, windowRadius);
 
       float gX, gY;
       std::tie(gX, gY) = ComputeDepthGradient(depthImage, m, n);
       float gradientTerm = gX * (x-m) + gY * (y-n); 
 
-      sumValues += weight * (depth + gradientTerm);
+      sumValues += weight * (depth /*+ gradientTerm*/);
       sumWeights += weight;
       count ++;
     }

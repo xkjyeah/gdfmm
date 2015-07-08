@@ -9,7 +9,7 @@ GDFMM::ExpCache::ExpCache(float sigma, int tableSize)
 
   lookupTable[0] = 1;
   for (int i=1; i<= tableSize; i++) {
-    lookupTable[i] = expf( - i / 2.0f / sigma / sigma );
+    lookupTable[i] = expf( - 0.5 * (i / sigma) * (i / sigma) );
   }
 }
 

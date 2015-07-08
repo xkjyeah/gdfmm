@@ -40,6 +40,7 @@ class GDFMM {
    * */
   GDFMM(float sigmaDistance = 2.0f,
         float sigmaColor = 10.0f,
+        float blurSigma = 1.0f,
         int windowSize = 11);
   /** \brief Inpaints missing depths 
    *
@@ -104,7 +105,7 @@ class GDFMM {
                      float constant,
                      float truncation);
   ExpCache distExpCache_, colorExpCache_;
-  unsigned int windowSize_;
+  unsigned int windowSize_, blurSigma_;
 };
 /** \brief Guided filter. Apply this to the image for the full algorithm.
  *
