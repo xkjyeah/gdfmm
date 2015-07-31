@@ -19,6 +19,9 @@ for i in xrange(100):
           rgb = cv2.cvtColor(bgr, cv2.cv.CV_BGR2RGB)
           dep = cv2.imread('images/dep%d.png' % i, cv2.CV_LOAD_IMAGE_UNCHANGED)
 
+          if dep.dtype == np.uint8:
+              dep = np.array(dep, dtype=np.uint16) * (10000 / 256)
+
           missing = dep.copy()
           missing[missing_mask] = 0
 

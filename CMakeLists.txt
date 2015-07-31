@@ -13,12 +13,12 @@ add_library(gdfmm SHARED
   src/guided_filter.cc
   src/gdfmm.cc)
 
-add_executable(test
+add_executable(testGdfmm
   src/test.cc)
 
 target_link_libraries(gdfmm
   ${OpenCV_LIBRARIES})
 
-target_link_libraries(test
+target_link_libraries(testGdfmm
   gdfmm)
 

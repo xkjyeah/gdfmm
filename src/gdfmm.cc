@@ -154,6 +154,18 @@ cv::Mat GDFMM::InPaintBase(const cv::Mat &depthImageOriginal,
       }
     }
   }
+  // Debug ComputeSpeed
+//  {
+//  cv::Mat rescaled(rgbImage.rows, rgbImage.cols, CV_32FC1);
+//  for (int y=0; y<rgbImage.rows; y++) {
+//    for (int x=0; x<rgbImage.cols; x++) {
+//      rescaled.at<float>(y,x) = -ComputeSpeed(rgbGradientStrength, Point{x,y});
+//    }
+//  }
+//  cv::imshow("what", rescaled);
+//  cv::waitKey(0);
+//  }
+
 
   // build the priority queue
   typedef pair<float, Point> BandItem;
@@ -430,7 +442,11 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
 static float ComputeSpeed(const cv::Mat &gradientStrength,
                           const Point &position)
 {
-  return -1.0f / (1 + gradientStrength.at<float>(position.y, position.x));
+  return -1.0f / (1 + 
+      gradientStrength.at<float[3]>(position.y, position.x)[0] + 
+      gradientStrength.at<float[3]>(position.y, position.x)[1] + 
+      gradientStrength.at<float[3]>(position.y, position.x)[2]
+      );
 }
 
 
