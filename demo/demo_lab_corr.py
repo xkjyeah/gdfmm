@@ -26,7 +26,7 @@ for i in xrange(100):
           inpainted = gdfmm.InpaintDepth2(missing,
                                            rgb,
                                            0,  # epsilon
-                                           1,  # homogenizing constant
+                                           100,  # homogenizing constant
                                            window_size = 7)
 
           # scale the depths to some visible range

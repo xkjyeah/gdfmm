@@ -24,7 +24,7 @@ for i in xrange(100):
 
           inpainted = gdfmm.InpaintDepth2(missing,
                                            rgb,
-                                           0,  # epsilon
+                                           1,  # epsilon
                                            1,  # homogenizing constant
                                            blur_sigma = 2.0,
                                            window_size = 11)

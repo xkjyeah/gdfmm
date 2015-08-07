@@ -100,8 +100,8 @@ cv::Mat GDFMM::InPaint2(const cv::Mat &depthImage,
                       output,
                       [this, epsilon, constant, truncation]
                       (const cv::Mat &dI,
-                          const cv::Mat &rgbI,
-                          int x, int y) {
+                       const cv::Mat &rgbI,
+                             int x, int y) {
                         return PredictDepth2(dI, rgbI,
                                              x, y,
                                              epsilon, constant,
@@ -116,7 +116,7 @@ cv::Mat GDFMM::InPaintBase(const cv::Mat &depthImageOriginal,
                 const PredictMethod &predict) {
   if (rgbImage.cols != depthImageOriginal.cols ||
       rgbImage.rows != depthImageOriginal.rows) {
-    throw invalid_argument_error("Images must have same size.");
+    throw std::runtime_error("Images must have same size.");
   }
   cv::Mat depthImage;
 
@@ -217,7 +217,7 @@ cv::Mat GDFMM::InPaintBase(const cv::Mat &depthImageOriginal,
         else {
           // re-try later
           if (speed < -20) {
-            throw data_error("Too few known values. "
+            throw std::runtime_error("Too few known values. "
                 "Try densifying your depth image first, "
                 "or increasing the window size.");
           }
@@ -356,7 +356,7 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
 
   if (num_known <= 3) {
     return 0;
-    throw data_error("Too few known values. "
+    throw std::runtime_error("Too few known values. "
         "Try densifying your depth image first, "
         "or increasing the window size.");
   }
@@ -371,10 +371,10 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
         continue;
       }
       else {
-        X(index, 0) = rgbImage.at<cv::Vec3b>(n, m)[0];
-        X(index, 1) = rgbImage.at<cv::Vec3b>(n, m)[1];
-        X(index, 2) = rgbImage.at<cv::Vec3b>(n, m)[2];
-        X(index, 3) = constant;
+        X(index, 0) = rgbImage.at<uint8_t[3]>(n, m)[0];
+        X(index, 1) = rgbImage.at<uint8_t[3]>(n, m)[1];
+        X(index, 2) = rgbImage.at<uint8_t[3]>(n, m)[2];
+        X(index, 3) = 0;
         Y(index) = depthImage.at<float>(n, m);
         index++;
       }
@@ -384,6 +384,18 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
   // Find mean
   Eigen::Array<float, 1, 4> mX = X.colwise().mean();
   Eigen::Array<float, 1, 1> mY = Y.colwise().mean();
+
+  // normalize x...
+  X = X.rowwise() - mX;
+  Y = Y.rowwise() - mY;
+
+  Eigen::Array<float, 1, 4> sX = sqrt((X * X).colwise().mean());
+  sX = sX.max(0.00001);
+  sX(0, 3) = 1;
+  X.col(3).fill(constant);
+  constant = std::max(0.00001f, constant);
+
+  X = X.rowwise() / sX;
 
   // Find covariance
   Eigen::Matrix4f cov = X.transpose().matrix() * X.matrix();
@@ -402,10 +414,14 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
 //  Eigen::Array<float, 1, 4> xy = (X.colwise() * Y).colwise().mean();
 //  beta = cov.ldlt().solve(xy.matrix().transpose());
   
-  Eigen::Vector4f test(rgbImage.at<cv::Vec3b>(y, x)[0],
-            rgbImage.at<cv::Vec3b>(y, x)[1],
-            rgbImage.at<cv::Vec3b>(y, x)[2],
-            constant);
+  Eigen::Vector4f test(
+            rgbImage.at<uint8_t[3]>(y, x)[0],
+            rgbImage.at<uint8_t[3]>(y, x)[1],
+            rgbImage.at<uint8_t[3]>(y, x)[2],
+            0);
+  test = ( (test.transpose().array() - mX) / sX).transpose().matrix();
+  test(3) = constant;
+
   assert(rgbImage.depth() == CV_8U);
   assert(rgbImage.channels() == 3);
 //  std::cout << "Y" << std::endl
@@ -418,7 +434,7 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
 //  std::cout << "xy: " << xy << std::endl;
 //  std::cout << num_known << std::endl;
 //  std::cout << beta.dot(test) << std::endl;
-  float prediction = beta.dot(test);
+  float prediction = beta.dot(test) + mY(0,0);
   assert(!isnan(prediction));
 
   // constrain the results to within a sane range
@@ -430,11 +446,11 @@ float GDFMM::PredictDepth2(const cv::Mat &depthImage,
 //
 //  prediction = std::max(meanY - 2 * stdY, prediction);
 //  prediction = std::min(meanY + 2 * stdY, prediction);
-  float minY = Y.minCoeff();
-  float maxY = Y.maxCoeff();
-  float rangeY = maxY - minY;
-  prediction = std::max(minY - rangeY * truncation, prediction);
-  prediction = std::min(maxY + rangeY * truncation, prediction);
+//  float minY = Y.minCoeff();
+//  float maxY = Y.maxCoeff();
+//  float rangeY = maxY - minY;
+//  prediction = std::max(minY - rangeY * truncation, prediction);
+//  prediction = std::min(maxY + rangeY * truncation, prediction);
 
   return prediction;
 }
